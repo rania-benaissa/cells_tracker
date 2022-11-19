@@ -48,7 +48,7 @@ def countImages(images, strat="all_images"):
         return count
 
 
-def animateSequence(images, interval=50, repeat_delay=1000):
+def animateSequence(images, interval=500, repeat_delay=1000):
     fig = plt.figure()
     frames = []
 
