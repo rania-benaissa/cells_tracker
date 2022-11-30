@@ -1,9 +1,11 @@
 
-from skimage.io import imread, imsave
+from skimage.io import imread
 import os
 import numpy as np
-from matplotlib import pyplot as plt
-import matplotlib.animation as animation
+import matplotlib.animation
+import matplotlib.pyplot as plt
+from IPython.display import HTML
+
 
 def load_folder(images_folder, strat="default"):
 
@@ -49,12 +51,36 @@ def countImages(images, strat="all_images"):
 
 
 def animateSequence(images, interval=500, repeat_delay=1000):
+
+    plt.rcParams["animation.html"] = "jshtml"
+    plt.ioff()
+
+    fig = plt.figure()
+
+    def animate(t):
+
+        plt.cla()
+        plt.axis("off")
+        plt.imshow(images[t], cmap="gray", animated=True)
+
+    anim = matplotlib.animation.FuncAnimation(fig, animate, frames=10)
+
+    return anim
+
+
+def animateSequenceVideo(images, interval=500, repeat_delay=1000):
     fig = plt.figure()
     frames = []
 
-    for image in images:
-        frames.append([plt.imshow(image, cmap="gray", animated=True)])
+    plt.axis("off")
 
-    anim = animation.ArtistAnimation(fig, frames, interval=interval, blit=True,
-                                     repeat_delay=repeat_delay)
-    plt.show()
+    for image in images:
+        frames.append([plt.imshow(image.reshape(
+            (image.shape[0], image.shape[1])), cmap="gray", animated=True)])
+
+    anim = matplotlib.animation.ArtistAnimation(fig, frames, interval=interval, blit=True,
+                                                repeat_delay=repeat_delay)
+
+    plt.close()
+    # Show the animation
+    return HTML(anim.to_html5_video())
