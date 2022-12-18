@@ -1,0 +1,24 @@
+// connects to ppti gateway
+ssh 21113797@ssh.ufr-info-p6.jussieu.fr
+
+// connect to gpu
+ssh ppti-gpu-4
+
+
+// copy from my pc to gateway
+
+scp myfile.zip 21113797@ssh.ufr-info-p6.jussieu.fr:
+
+// copy from gateway to gpu
+ranben98@SU
+ssh 21113797@ssh.ufr-info-p6.jussieu.fr
+21113797@ssh:~$ scp /Vrac/myfile.zip ppti-gpu-1:
+
+// clean up ppti part
+rm /Vrac/myfile.zip
+
+# what salim sent me 
+
+ssh -L localhost:8000:localhost:8080 21113797@ssh.ufr-info-p6.jussieu.fr
+ssh -L8888:localhost:8888 -L 8080:localhost:8080 ppti-gpu-4
+jupyter notebook --notebook-dir=. --port=8080
