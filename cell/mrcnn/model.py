@@ -21,6 +21,7 @@ import tensorflow.keras.layers as KL
 import tensorflow.keras.utils as KU
 from tensorflow.python.eager import context
 import tensorflow.keras.models as KM
+from mrcnn.customCallback import *
 
 from mrcnn import utils
 
@@ -795,7 +796,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
 
     # 2. Map over class IDs
     nms_keep = tf.map_fn(nms_keep_map, unique_pre_nms_class_ids,
-                         dtype=tf.int64)
+                         fn_output_signature=tf.int64)
     # 3. Merge results into one list, and remove -1 padding
     nms_keep = tf.reshape(nms_keep, [-1])
     nms_keep = tf.gather(nms_keep, tf.compat.v1.where(nms_keep > -1)[:, 0])
@@ -2113,6 +2114,7 @@ class MaskRCNN(object):
             The path of the last checkpoint file
         """
         # Get directory names. Each directory corresponds to a model
+        print(self.model_dir)
         dir_names = next(os.walk(self.model_dir))[1]
         key = self.config.NAME.lower()
         dir_names = filter(lambda f: f.startswith(key), dir_names)
@@ -2307,6 +2309,21 @@ class MaskRCNN(object):
         self.checkpoint_path = self.checkpoint_path.replace(
             "*epoch*", "{epoch:04d}")
 
+    def getTrainingInfos(self, values):
+
+        parameters = ["nb_train_img", "nb_val_img",
+                      "layers_trained", "epochs", "bsize", "LR", "augmented"]
+
+        run_infos = dict.fromkeys(parameters)
+
+        values[-1] = True if values[-1] is not None else False
+
+        for i, key in enumerate(parameters):
+
+            run_infos[key] = values[i]
+
+        return run_infos
+
     def train(self, train_dataset, val_dataset, learning_rate, epochs, layers,
               augmentation=None, custom_callbacks=None, no_augmentation_sources=None):
         """Train the model.
@@ -2355,6 +2372,7 @@ class MaskRCNN(object):
             "all": ".*",
         }
         if layers in layer_regex.keys():
+            training_layers = layers
             layers = layer_regex[layers]
 
         # Data generators
@@ -2366,10 +2384,15 @@ class MaskRCNN(object):
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
+        # gathers training infos
+        values = [train_dataset.num_images, val_dataset.num_images, training_layers,
+                  epochs, self.config.BATCH_SIZE, learning_rate, augmentation]
+
         # Callbacks
         callbacks = [
-            keras.callbacks.TensorBoard(log_dir=self.log_dir,
-                                        histogram_freq=0, write_graph=True, write_images=False),
+            # keras.callbacks.TensorBoard(
+            #     log_dir=self.log_dir, histogram_freq=0, write_graph=True, write_images=False),
+            CustomCallback(self.log_dir, self.getTrainingInfos(values)),
             keras.callbacks.ModelCheckpoint(self.checkpoint_path,
                                             verbose=0, save_weights_only=True),
         ]
