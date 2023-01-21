@@ -1,0 +1,16 @@
+# command to access to GPU 
+
+ssh -J 21113797@ssh.ufr-info-p6.jussieu.fr  21113797@ppti-gpu-4
+
+# command to launch non stoping server
+
+nohup jupyter notebook cell_model.ipynb> script.log &
+
+
+# this one is for python scripts
+nohup ipython -u cell_model.py > script.log &
+
+
+# convert a notebook to python 
+
+jupyter nbconvert --to python cell_model.ipynb 

@@ -2382,6 +2382,7 @@ class MaskRCNN(object):
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
+         # gathers training infos
         values = [train_dataset.num_images, val_dataset.num_images, training_layers,
                   self.config.EPOCHS, self.config.BATCH_SIZE, self.config.LEARNING_RATE, augmentation]
 
@@ -2390,6 +2391,7 @@ class MaskRCNN(object):
             # keras.callbacks.TensorBoard(log_dir=self.log_dir,
             #                             histogram_freq=0, write_graph=True, write_images=False),
             CustomCallback(self.log_dir, self.getTrainingInfos(values)),
+
             keras.callbacks.ModelCheckpoint(self.checkpoint_path,
                                             verbose=0, save_weights_only=True),
         ]

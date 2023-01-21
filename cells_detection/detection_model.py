@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 from cells_detection.cell import *
 from mrcnn import visualize
 import mrcnn.model as modellib
-from mrcnn.model import log
+from cells_detection.cellConfig import *
+from cells_detection.train_model import selectWeights
 
 
 def get_ax(rows=1, cols=1, size=16):
@@ -26,11 +27,11 @@ def get_ax(rows=1, cols=1, size=16):
     return ax
 
 
-def prepareDataset(dataset_dir):
+def prepareDataset(dataset_dir, subdir="test"):
 
     # Validation dataset
     dataset_test = CellDataset()
-    dataset_test.load_cell(dataset_dir, "test")
+    dataset_test.load_cell(dataset_dir, subdir)
     dataset_test.prepare()
 
     return dataset_test
@@ -97,7 +98,7 @@ def mask_to_rle(image_id, mask, scores):
 #  Detection
 ############################################################
 
-def detect(model, dataset):
+def random_detection(model, dataset, nb_images="all"):
     """Run detection on images in the given directory."""
 
     # Create directory
@@ -109,28 +110,35 @@ def detect(model, dataset):
 
     # Load over images
     submission = []
-    for image_id in dataset.image_ids:
+
+    nb_images = enumerate(dataset.image_ids) if nb_images is "all" else enumerate(
+        dataset.image_ids[:nb_images])
+
+    for i, image_id in nb_images:
 
         plt.figure()
         # Load image and run detection
         image = dataset.load_image(image_id)
         # Detect objects
         r = model.detect([image], verbose=0)[0]
-        # Encode image to RLE. Returns a string of multiple lines
-        source_id = dataset.image_info[image_id]["id"]
-        rle = mask_to_rle(source_id, r["masks"], r["scores"])
-        submission.append(rle)
+
         # Save image with masks
-        visualize.display_instances(
-            image, r['rois'], r['masks'], r['class_ids'],
-            dataset.class_names, r['scores'],
-            show_bbox=True, show_mask=True,
-            title="Predictions")
+
+        visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'],
+                                    dataset.class_names, r['scores'], ax=get_ax(
+                                        1),
+                                    show_bbox=True, show_mask=True,
+                                    title="Predictions")
+
         plt.savefig("{}/{}.png".format(submit_dir,
                     dataset.image_info[image_id]["id"]))
 
 
-def run_detection(model, dataset, config):
+def model_detection(model, dataset, config, nb_images="all"):
+
+    ap_range = np.arange(0.5, 1.0, 0.05)
+
+    aps_images = np.zeros((len(ap_range), len(dataset.image_ids)))
 
     # Create directory
     if not os.path.exists(TEST_SAVE_DIR):
@@ -139,8 +147,11 @@ def run_detection(model, dataset, config):
     submit_dir = os.path.join(TEST_SAVE_DIR, submit_dir)
     os.makedirs(submit_dir)
 
+    nb_images = enumerate(dataset.image_ids) if nb_images is "all" else enumerate(
+        dataset.image_ids[:nb_images])
+
     # Load over images
-    for image_id in dataset.image_ids:
+    for j, image_id in nb_images:
 
         image, image_meta, gt_class_id, gt_bbox, gt_mask =\
             modellib.load_image_gt(
@@ -148,8 +159,8 @@ def run_detection(model, dataset, config):
 
         info = dataset.image_info[image_id]
 
-        print("image ID: {}.{} ({}) {}".format(info["source"], info["id"], image_id,
-                                               dataset.image_reference(image_id)))
+        # print("image ID: {}.{} ({}) {}".format(info["source"], info["id"], image_id,
+        #                                        dataset.image_reference(image_id)))
 
         # print("Original image shape: ", modellib.parse_image_meta(
         #     image_meta[np.newaxis, ...])["original_image_shape"][0])
@@ -163,13 +174,47 @@ def run_detection(model, dataset, config):
 
         # log("gt_class_id", gt_class_id)
         # log("gt_bbox", gt_bbox)
+        # log("found_bbox", r['rois'])
         # log("gt_mask", gt_mask)
+        # log("found_mask", r['masks'])
 
-        # Compute AP over range 0.5 to 0.95 and print it
-        # utils.compute_ap_range(gt_bbox, gt_class_id, gt_mask,
-        #                        r['rois'], r['class_ids'], r['scores'], r['masks'],
-        #                        verbose=1)
+        for i, apr in enumerate(ap_range):
 
+            # precision and recalls contains the values for each predicted bb
+            # map of the image = the area of the precision recall curve
+            mAP, precision, recall, overlap = utils.compute_ap(gt_bbox, gt_class_id, gt_mask,
+                                                               r['rois'], r['class_ids'], r['scores'], r['masks'],
+                                                               iou_threshold=apr)
+
+            aps_images[i, j] = mAP
+
+            # if i ever want to plot the precision recall of an image
+
+            # visualize.plot_precision_recall(
+            #     mAP, precision, recall, apr)
+
+            # plt.savefig("{}/{}.png".format(submit_dir,
+            #                                dataset.image_info[image_id]["id"] + "precision_recall_" + str(apr)))
+
+        # # Display predictions only
+        # visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'],
+        #                             dataset.class_names, r['scores'], ax=get_ax(
+        #                                 1),
+        #                             show_bbox=True, show_mask=True,
+        #                             title="Predictions")
+
+        # plt.savefig("{}/{}.png".format(submit_dir,
+        #             dataset.image_info[image_id]["id"] + "_predicted"))
+
+        # # Display groundtruth only
+        # visualize.display_instances(image, gt_bbox, gt_mask, gt_class_id,
+        #                             dataset.class_names, ax=get_ax(1),
+        #                             show_bbox=True, show_mask=True,
+        #                             title="Ground Truth")
+        # plt.savefig("{}/{}.png".format(submit_dir,
+        #             dataset.image_info[image_id]["id"] + "_gt"))
+
+        # display both gt and predictions
         visualize.display_differences(
             image,
             gt_bbox, gt_class_id, gt_mask,
@@ -179,3 +224,34 @@ def run_detection(model, dataset, config):
             iou_threshold=0.5, score_threshold=0.5)
         plt.savefig("{}/{}.png".format(submit_dir,
                     dataset.image_info[image_id]["id"]))
+
+    for i, apr in enumerate(ap_range):
+
+        print("model map@", apr, " = ", aps_images[i].mean())
+
+
+def detect(weights, config, DATASET_DIR2, with_gt=True, nb_images="all"):
+
+    print("Weights: ", weights)
+    print("Dataset: ", DATASET_DIR2)
+
+    # # Configurations
+
+    config = CellInferenceConfig()
+
+    # config.display()
+
+    dataset = prepareDataset(DATASET_DIR2)
+
+    # # Create model
+    model = modellib.MaskRCNN(mode="inference", config=config,
+                              model_dir=TEST_SAVE_DIR)
+
+    # select weights
+    model = selectWeights(model, weights)
+
+    # # evaluate
+    if(with_gt):
+        model_detection(model, dataset, config, nb_images)
+    else:
+        random_detection(model, dataset, nb_images)

@@ -52,11 +52,11 @@ class CustomCallback(keras.callbacks.Callback):
 
             # train
             self.train_loss_log.add_scalar(
-                "Loss/" + log_keys[i], logs[log_keys[i]], epoch)
+                "Loss/" + log_keys[i], logs[log_keys[i]], epoch + 1)
 
             # add validation scalars to a plot
             self.val_loss_log.add_scalar(
-                "Loss/" + log_keys[i], logs[log_keys[i + self.nb_loss]], epoch)
+                "Loss/" + log_keys[i], logs[log_keys[i + self.nb_loss]], epoch + 1)
 
         self.train_losses[epoch] = logs[log_keys[0]]
         self.val_losses[epoch] = logs[log_keys[6]]
