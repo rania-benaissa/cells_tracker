@@ -1025,7 +1025,8 @@ def build_fpn_mask_graph(rois, feature_maps, image_meta,
     num_classes: number of classes, which determines the depth of the results
     train_bn: Boolean. Train or freeze Batch Norm layers
 
-    Returns: Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
+    Returns: Masks [batch, num_rois,
+        MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
     """
     # ROI Pooling
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
@@ -1345,7 +1346,8 @@ def build_detection_targets(rpn_rois, gt_class_ids, gt_boxes, gt_masks, config):
     Returns:
     rois: [TRAIN_ROIS_PER_IMAGE, (y1, x1, y2, x2)]
     class_ids: [TRAIN_ROIS_PER_IMAGE]. Integer class IDs.
-    bboxes: [TRAIN_ROIS_PER_IMAGE, NUM_CLASSES, (y, x, log(h), log(w))]. Class-specific
+    bboxes: [TRAIN_ROIS_PER_IMAGE, NUM_CLASSES,
+        (y, x, log(h), log(w))]. Class-specific
             bbox refinements.
     masks: [TRAIN_ROIS_PER_IMAGE, height, width, NUM_CLASSES). Class specific masks cropped
            to bbox boundaries and resized to neural network output size.
@@ -1863,6 +1865,7 @@ class MaskRCNN(object):
         self.model_dir = model_dir
         self.set_log_dir()
         self.keras_model = self.build(mode=mode, config=config)
+        self.optimizer = None
 
     def build(self, mode, config):
         """Build Mask R-CNN architecture.
@@ -2190,10 +2193,25 @@ class MaskRCNN(object):
         """Gets the model ready for training. Adds losses, regularization, and
         metrics. Then calls the Keras compile() function.
         """
-        # Optimizer object
-        optimizer = keras.optimizers.SGD(
-            lr=learning_rate, momentum=momentum,
-            clipnorm=self.config.GRADIENT_CLIP_NORM)
+        # Optimizer object -> if it s none init
+        if(self.optimizer is None and self.config.OPTIMIZER == "ADAM"):
+
+            self.optimizer = keras.optimizers.Adam(
+                learning_rate=learning_rate, amsgrad=True, clipnorm=self.config.GRADIENT_CLIP_NORM)
+
+        if(self.config.OPTIMIZER == "SGD"):
+
+            if(self.optimizer is None):
+
+                self.optimizer = keras.optimizers.SGD(
+                    learning_rate=learning_rate, momentum=momentum,
+                    clipnorm=self.config.GRADIENT_CLIP_NORM)
+
+            else:
+
+                # set the right learning rate
+                self.optimizer.learning_rate = learning_rate
+
         # Add Losses
         loss_names = [
             "rpn_class_loss", "rpn_bbox_loss",
@@ -2218,7 +2236,7 @@ class MaskRCNN(object):
 
         # Compile
         self.keras_model.compile(
-            optimizer=optimizer,
+            optimizer=self.optimizer,
             loss=[None] * len(self.keras_model.outputs))
 
         # Add metrics for losses
@@ -2311,7 +2329,7 @@ class MaskRCNN(object):
     def getTrainingInfos(self, values):
 
         parameters = ["nb_train_img", "nb_val_img",
-                      "layers_trained", "epochs", "bsize", "LR", "augmented"]
+                      "layers_trained", "epochs", "bsize", "optimizer", "LR", "augmented"]
 
         run_infos = {}
 
@@ -2323,7 +2341,7 @@ class MaskRCNN(object):
         return run_infos
 
     def train(self, train_dataset, val_dataset, learning_rate, epochs, layers,
-              augmentation=None, custom_callbacks=None, no_augmentation_sources=None):
+              augmentation=None, custom_callbacks=None):
         """Train the model.
         train_dataset, val_dataset: Training and validation Dataset objects.
         learning_rate: The learning rate to train with
@@ -2384,7 +2402,7 @@ class MaskRCNN(object):
 
          # gathers training infos
         values = [train_dataset.num_images, val_dataset.num_images, training_layers,
-                  self.config.EPOCHS, self.config.BATCH_SIZE, self.config.LEARNING_RATE, augmentation]
+                  self.config.EPOCHS, self.config.BATCH_SIZE, self.config.OPTIMIZER, self.config.LEARNING_RATE, augmentation]
 
         # Callbacks
         callbacks = [
@@ -2404,6 +2422,9 @@ class MaskRCNN(object):
         log("\nStarting at epoch {}. LR={}\n".format(self.epoch, learning_rate))
         log("Checkpoint Path: {}".format(self.checkpoint_path))
         self.set_trainable(layers)
+
+        # if i do it only once
+
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
 
         # Work-around for Windows: Keras fails on Windows when using
@@ -2575,16 +2596,14 @@ class MaskRCNN(object):
             log("image_metas", image_metas)
             log("anchors", anchors)
         # Run object detection
-        detections, _, _, mrcnn_mask, _, _, _ =\
-            self.keras_model.predict(
-                [molded_images, image_metas, anchors], verbose=0)
+        detections, _, _, mrcnn_mask, _, _, _ = self.keras_model.predict(
+            [molded_images, image_metas, anchors], verbose=0)
         # Process detections
         results = []
         for i, image in enumerate(images):
-            final_rois, final_class_ids, final_scores, final_masks =\
-                self.unmold_detections(detections[i], mrcnn_mask[i],
-                                       image.shape, molded_images[i].shape,
-                                       windows[i])
+            final_rois, final_class_ids, final_scores, final_masks = self.unmold_detections(detections[i], mrcnn_mask[i],
+                                                                                            image.shape, molded_images[i].shape,
+                                                                                            windows[i])
             results.append({
                 "rois": final_rois,
                 "class_ids": final_class_ids,
@@ -2634,17 +2653,15 @@ class MaskRCNN(object):
             log("image_metas", image_metas)
             log("anchors", anchors)
         # Run object detection
-        detections, _, _, mrcnn_mask, _, _, _ =\
-            self.keras_model.predict(
-                [molded_images, image_metas, anchors], verbose=0)
+        detections, _, _, mrcnn_mask, _, _, _ = self.keras_model.predict(
+            [molded_images, image_metas, anchors], verbose=0)
         # Process detections
         results = []
         for i, image in enumerate(molded_images):
             window = [0, 0, image.shape[0], image.shape[1]]
-            final_rois, final_class_ids, final_scores, final_masks =\
-                self.unmold_detections(detections[i], mrcnn_mask[i],
-                                       image.shape, molded_images[i].shape,
-                                       window)
+            final_rois, final_class_ids, final_scores, final_masks = self.unmold_detections(detections[i], mrcnn_mask[i],
+                                                                                            image.shape, molded_images[i].shape,
+                                                                                            window)
             results.append({
                 "rois": final_rois,
                 "class_ids": final_class_ids,
@@ -2725,7 +2742,7 @@ class MaskRCNN(object):
                 layers.append(l)
         return layers
 
-    def run_graph(self, images, outputs, image_metas=None):
+    def run_graph(self, images, outputs, image_metas=None, verbose=0):
         """Runs a sub-set of the computation graph that computes the given
         outputs.
 
@@ -2773,8 +2790,10 @@ class MaskRCNN(object):
         # Pack the generated Numpy arrays into a a dict and log the results.
         outputs_np = OrderedDict([(k, v)
                                   for k, v in zip(outputs.keys(), outputs_np)])
-        for k, v in outputs_np.items():
-            log(k, v)
+
+        if(verbose):
+            for k, v in outputs_np.items():
+                log(k, v)
         return outputs_np
 
 

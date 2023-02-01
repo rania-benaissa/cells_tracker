@@ -29,13 +29,13 @@ class CellDataset(utils.Dataset):
         # "val": use hard-coded list above
         # "train": use data from stage1_train minus the hard-coded list above
         # else: use the data from the specified sub-directory
-        assert subset in ["train", "val", "test", "dataset"]
+        # assert subset in ["train", "val", "test", "dataset"]
 
         dataset_dir = os.path.join(dataset_dir, subset)
 
         # Get image ids from directory names
         image_ids = [filename.replace('.tif', '')
-                     for filename in os.listdir(dataset_dir)]
+                     for filename in sorted(os.listdir(dataset_dir))]
 
         # Add images
         for image_id in image_ids:

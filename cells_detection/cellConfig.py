@@ -29,7 +29,7 @@ class CellConfig(Config):
 
     # Backbone network architecture
     # Supported values are: resnet50, resnet101
-    BACKBONE ="resnet101" #"resnet50"
+    BACKBONE = "resnet50"
 
     # Input image resizing
     # Random crops of size 512x512
@@ -51,7 +51,7 @@ class CellConfig(Config):
 
     # How many anchors per image to use for RPN training
     #RPN_TRAIN_ANCHORS_PER_IMAGE = 64
-    RPN_TRAIN_ANCHORS_PER_IMAGE = 128  # 256  # 128
+    RPN_TRAIN_ANCHORS_PER_IMAGE = 128  # 256
 
     # Image mean (RGB)
     #MEAN_PIXEL = np.array([43.53, 39.56, 48.22])
@@ -89,7 +89,9 @@ class CellConfig(Config):
 
     AUGMENT_TRAIN = True
 
-    def __init__(self, epochs=5, is_aug=True, bsize=6, lr=10e-3):
+    OPTIMIZER = "SGD"
+
+    def __init__(self, epochs=5, is_aug=True, bsize=6, optimizer="SGD", lr=10e-3):
         super(CellConfig, self).__init__()
 
         self.IMAGES_PER_GPU = bsize  # basically it was six
@@ -108,6 +110,7 @@ class CellConfig(Config):
         self.EPOCHS = epochs
         self.AUGMENT_TRAIN = is_aug
         self.LEARNING_RATE = lr
+        self.OPTIMIZER = optimizer
 
 
 class CellInferenceConfig(CellConfig):

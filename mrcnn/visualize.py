@@ -455,7 +455,91 @@ def draw_boxes(image, boxes=None, refined_boxes=None,
                 verts = np.fliplr(verts) - 1
                 p = Polygon(verts, facecolor="none", edgecolor=color)
                 ax.add_patch(p)
+
     ax.imshow(masked_image.astype(np.uint8))
+
+
+def draw_frame_boxes(image, boxes=None,
+                     masks=None, captions=None, visibilities=None,
+                     title="", ax=None, colors=None, animated=False):
+    """Draw bounding boxes and segmentation masks with different
+    customizations.
+
+    boxes: [N, (y1, x1, y2, x2, class_id)] in image coordinates.
+
+    masks: [N, height, width]
+    captions: List of N titles to display on each box
+    visibilities: (optional) List of values of 0, 1, or 2. Determine how
+        prominent each bounding box should be.
+    title: An optional title to show over the image
+    ax: (optional) Matplotlib axis to draw on.
+    """
+    N = boxes.shape[0]
+
+    # Matplotlib Axis
+    if not ax:
+        _, ax = plt.subplots(1, figsize=(12, 12))
+
+    # Show area outside image boundaries.
+    # margin = image.shape[0] // 10
+    # ax.set_ylim(image.shape[0] + margin, -margin)
+    # ax.set_xlim(-margin, image.shape[1] + margin)
+    ax.axis('off')
+
+    ax.set_title(title)
+
+    masked_image = image.astype(np.uint32).copy()
+    for i in range(N):
+        # Box visibility
+        visibility = visibilities[i] if visibilities is not None else 1
+        if visibility == 0:
+            color = "gray"
+            style = "dotted"
+            alpha = 0.5
+        elif visibility == 1:
+            color = colors[i]
+            style = "dotted"
+            alpha = 1
+        elif visibility == 2:
+            color = colors[i]
+            style = "solid"
+            alpha = 1
+
+        # Refined boxes
+        if boxes is not None and visibility > 0:
+            ry1, rx1, ry2, rx2 = boxes[i].astype(np.int32)
+            p = patches.Rectangle((rx1, ry1), rx2 - rx1, ry2 - ry1, linewidth=1,
+                                  edgecolor=color, facecolor='none')
+            ax.add_patch(p)
+
+        # Captions
+        if captions is not None:
+            caption = captions[i]
+            # If there are refined boxes, display captions on them
+            if boxes is not None:
+                y1, x1, y2, x2 = ry1, rx1, ry2, rx2
+            ax.text(x1, y1, caption, size=9, verticalalignment='top',
+                    color='w', backgroundcolor="none",
+                    bbox={'facecolor': color, 'alpha': 0.5,
+                          'pad': 2, 'edgecolor': 'none'})
+
+        # Masks
+        if masks is not None:
+            mask = masks[:, :, i]
+            masked_image = apply_mask(masked_image, mask, color)
+            # Mask Polygon
+            # Pad to ensure proper polygons for masks that touch image edges.
+            padded_mask = np.zeros(
+                (mask.shape[0] + 2, mask.shape[1] + 2), dtype=np.uint8)
+            padded_mask[1:-1, 1:-1] = mask
+            contours = find_contours(padded_mask, 0.5)
+            for verts in contours:
+                # Subtract the padding and flip (y, x) to (x, y)
+                verts = np.fliplr(verts) - 1
+                p = Polygon(verts, facecolor="none", edgecolor=color)
+                ax.add_patch(p)
+
+    return ax.imshow(masked_image.astype(np.uint8), animated=animated)
 
 
 def display_table(table):
