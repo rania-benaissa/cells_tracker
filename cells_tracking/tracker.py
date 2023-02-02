@@ -212,6 +212,8 @@ class Tracker():
 
             distance = cdist(
                 frame1_removed_centroids, frame2_unknown_centroids)
+            print(frame1_removed_ids)
+            print(distance)
 
             for i in range(len(distance)):
 
