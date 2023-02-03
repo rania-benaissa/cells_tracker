@@ -25,6 +25,17 @@ class Frame():
 
             self.objects[i] = Object(identifier, image_boxes[i], features=None)
 
+    def set_objects_ids(self, preds, objects_ids):
+
+        predecs = np.ones(len(self.objects),
+                          dtype=bool) if preds is None else list(map(preds.__contains__, objects_ids))
+
+        for i, obj in enumerate(self.objects):
+
+            obj.id = objects_ids[i]
+
+            obj.isNew = predecs[i]
+
     def get_all_ids(self):
 
         ids = np.zeros((len(self.objects)), np.int32)

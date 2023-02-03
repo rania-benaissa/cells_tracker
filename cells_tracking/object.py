@@ -7,6 +7,8 @@ class Object():
 
         self.bbox = bbox
 
+        self.isNew = True
+
         self.features = features
 
         self.id = identifier

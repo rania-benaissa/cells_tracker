@@ -13,6 +13,24 @@ import matplotlib.animation as animation
 from mrcnn.utils import compute_overlaps
 from cells_tracking.object import *
 from IPython.display import HTML
+from skimage.measure import regionprops
+
+from skimage.color import gray2rgb
+
+
+def rescale_bounding_boxes(bounding_boxes, original_shape, new_shape):
+    original_width, original_height = original_shape[1], original_shape[0]
+    new_width, new_height = new_shape[1], new_shape[0]
+    width_scale = new_width / original_width
+    height_scale = new_height / original_height
+    rescaled_bounding_boxes = []
+    for y1, x1, y2, x2 in bounding_boxes:
+        x1 *= width_scale
+        y1 *= height_scale
+        x2 *= width_scale
+        y2 *= height_scale
+        rescaled_bounding_boxes.append([y1, x1, y2, x2])
+    return np.array(rescaled_bounding_boxes)
 
 
 def get_ax(rows=1, cols=1, size=12):
@@ -155,6 +173,8 @@ class Tracker():
 
     def __init__(self, DATASET_DIR2="", weights="", subdir="val", nb_images="all"):
 
+        self.gt_frames = None
+
         self.SEQUENCE_DIR = "Images" if DATASET_DIR2 == "" else DATASET_DIR2
 
         self.detection_weights = "train_results3/cell20230123T1638/mask_rcnn_cell_0080.h5" if weights == "" else weights
@@ -166,7 +186,7 @@ class Tracker():
 
         self.detection_config = CellInferenceConfig()
 
-        dataset = prepareDataset(self.SEQUENCE_DIR, subdir)
+        self.dataset = prepareDataset(self.SEQUENCE_DIR, subdir)
 
         # # Create model
         self.detection_model = modellib.MaskRCNN(mode="inference", config=self.detection_config,
@@ -177,7 +197,7 @@ class Tracker():
             self.detection_model, self.detection_weights)
 
         # this sets the self.frames
-        self.fill_sequence(dataset, nb_images)
+        self.fill_sequence(self.dataset, nb_images)
 
         self.colors = random_colors(1000)
 
@@ -212,8 +232,8 @@ class Tracker():
 
             distance = cdist(
                 frame1_removed_centroids, frame2_unknown_centroids)
-            print(frame1_removed_ids)
-            print(distance)
+            # print(frame1_removed_ids)
+            # print(distance)
 
             for i in range(len(distance)):
 
@@ -224,6 +244,7 @@ class Tracker():
                     idx = positions[distance[i].argmin()]
 
                     frame2.objects[idx].id = frame1_removed_ids[i]
+                    frame2.objects[idx].isNew = False
 
         return frame2
 
@@ -235,6 +256,7 @@ class Tracker():
         for i in range(len(col_ind)):
 
             frame2.objects[col_ind[i]].id = frame1_ids[row_ind[i]]
+            frame2.objects[col_ind[i]].isNew = False
 
         self.max_id = self.max_id if self.max_id >= frame2.get_max_id() else frame2.get_max_id()
 
@@ -338,6 +360,85 @@ class Tracker():
 
         plt.close()
         return anim
+
+    def animate_gt(self):
+
+        plt.rcParams["animation.html"] = "jshtml"
+        fig, ax = get_ax()
+
+        def animate2(t):
+
+            ax.clear()
+
+            objects_ids = self.gt_frames[t].get_all_ids()
+
+            objects_boxes = self.gt_frames[t].get_all_boxes()
+
+            captions = list(map(str, objects_ids))
+
+            colors = [self.colors[i] for i in objects_ids]
+
+            vis = 2 * np.ones((len(objects_boxes)))
+
+            title = "Nb. objects = " + \
+                str(len(captions)) + " Id max = " + str(objects_ids.max())
+
+            draw_frame_boxes(self.gt_frames[t].image, visibilities=vis, boxes=objects_boxes, captions=captions,
+                             title=title, ax=ax, colors=colors)
+
+        anim = animation.FuncAnimation(
+            fig, animate2, frames=len(self.gt_frames))
+
+        plt.close()
+        return anim
+
+    def load_gt(self, path_ids="", path_boxes=""):
+
+        files_ids = sorted(os.listdir(path_ids))
+        files_boxes = sorted(os.listdir(path_boxes))
+
+        self.gt_frames = np.empty((len(self.frames)), dtype=object)
+
+        for i in range(len(files_boxes)):
+
+            id_frame = skimage.io.imread(
+                os.path.join(path_ids, files_ids[i]))
+
+            preds = None if i == 0 else objects_ids.copy()
+
+            objects_ids = np.array(
+                [obj.mean_intensity for obj in regionprops(id_frame, id_frame)], np.int32)
+
+            image = skimage.io.imread(
+                os.path.join(path_boxes, files_boxes[i]))
+
+            identifier = files_boxes[i]
+
+            image, window, scale, padding, crop = utils.resize_image(
+                gray2rgb(image),
+                min_dim=self.detection_config.IMAGE_MIN_DIM,
+                min_scale=self.detection_config.IMAGE_MIN_SCALE,
+                max_dim=self.detection_config.IMAGE_MAX_DIM,
+                mode=self.detection_config.IMAGE_RESIZE_MODE)
+
+            mask = utils.resize_mask(self.dataset.load_mask(
+                self.dataset.image_ids[i])[0], scale, padding, crop)
+
+            # image_boxes = np.array([obj.bbox for obj in regionprops(image)])
+
+            # image_boxes = rescale_bounding_boxes(
+            #     image_boxes, image.shape, self.frames[i].image.shape[:2])
+
+            image_boxes = utils.extract_bboxes(mask)
+
+            # image_boxes=rescale_bounding_boxes(
+            #     image_boxes, image.shape, self.frames[i].image.shape[:2])
+
+            self.gt_frames[i] = Frame(
+                identifier, self.frames[i].image, image_boxes=image_boxes, idx=i)
+
+            # i set the objects ids and predecessors relationship
+            self.gt_frames[i].set_objects_ids(preds, objects_ids)
 
     def video_tracking(self, interval=500, repeat_delay=10000):
 
