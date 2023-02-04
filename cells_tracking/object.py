@@ -3,13 +3,15 @@ import numpy as np
 
 class Object():
 
-    def __init__(self, identifier, bbox, features=None):
+    def __init__(self, identifier, bbox, mask, score):
 
         self.bbox = bbox
 
         self.isNew = True
 
-        self.features = features
+        self.mask = mask
+
+        self.score = score
 
         self.id = identifier
 

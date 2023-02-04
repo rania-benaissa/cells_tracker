@@ -75,6 +75,7 @@ class CellDataset(utils.Dataset):
 
         # Read mask files from .png image
         mask = []
+
         filename = "man_seg" + info['id'][1:] + ".tif"
 
         m = skimage.io.imread(os.path.join(

@@ -117,8 +117,11 @@ class CellInferenceConfig(CellConfig):
     # Set batch size to 1 to run one image at a time
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
+    IMAGE_MIN_DIM = 128
+    IMAGE_MAX_DIM = 128
 
     # Don't resize imager for inferencing
+
     IMAGE_RESIZE_MODE = "pad64"
     # Non-max suppression threshold to filter RPN proposals.
     # You can increase this during training to generate more propsals.
@@ -126,6 +129,9 @@ class CellInferenceConfig(CellConfig):
 
     def __init__(self, bsize=1):
         super(CellConfig, self).__init__()
+
+        self.IMAGE_MIN_DIM = 128
+        self.IMAGE_MAX_DIM = 128
 
         self.IMAGES_PER_GPU = bsize  # basically it was six
 

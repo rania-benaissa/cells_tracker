@@ -13,24 +13,7 @@ import matplotlib.animation as animation
 from mrcnn.utils import compute_overlaps
 from cells_tracking.object import *
 from IPython.display import HTML
-from skimage.measure import regionprops
 
-from skimage.color import gray2rgb
-
-
-def rescale_bounding_boxes(bounding_boxes, original_shape, new_shape):
-    original_width, original_height = original_shape[1], original_shape[0]
-    new_width, new_height = new_shape[1], new_shape[0]
-    width_scale = new_width / original_width
-    height_scale = new_height / original_height
-    rescaled_bounding_boxes = []
-    for y1, x1, y2, x2 in bounding_boxes:
-        x1 *= width_scale
-        y1 *= height_scale
-        x2 *= width_scale
-        y2 *= height_scale
-        rescaled_bounding_boxes.append([y1, x1, y2, x2])
-    return np.array(rescaled_bounding_boxes)
 
 
 def get_ax(rows=1, cols=1, size=12):
@@ -56,107 +39,28 @@ def prepareDataset(dataset_dir, subdir="val"):
     return dataset_test
 
 
-def extract_image_features(image_id, model, config, dataset, feature_size=64):
+def extract_image_detections(image_id, model, config, dataset, gt_exists=True):
 
-    image = dataset.load_image(image_id)
+    if gt_exists:
 
-    mrcnn = model.run_graph([image], [
-        # backbone output
-        ("res4f_out", model.keras_model.get_layer("res4f_out").output),  #
-        ("detections", model.keras_model.get_layer("mrcnn_detection").output),
-    ])
+        image, image_meta, gt_class_id, gt_bbox, gt_mask = modellib.load_image_gt(
+            dataset, config, image_id)
 
-    # (1024, 88, 140)
-    activations = np.transpose(mrcnn["res4f_out"][0, :, :, :], [2, 0, 1])
+        results = model.detect_molded(np.expand_dims(
+            image, 0), np.expand_dims(image_meta, 0), verbose=0)
 
-    # resize activations
+        # Display results
+        r = results[0]
 
-    activations = np.array([np.squeeze(utils.resize_image(
-        np.expand_dims(activ_map, -1),
-        min_dim=config.IMAGE_MIN_DIM,
-        min_scale=config.IMAGE_MIN_SCALE,
-        max_dim=config.IMAGE_MAX_DIM,
-        mode=config.IMAGE_RESIZE_MODE)[0]) for activ_map in activations])
+        return image, r['rois'], r['masks'], r['scores'], gt_bbox, gt_mask
 
-    nb_detections = mrcnn['detections'][0, :, 4].astype(np.int32).sum()
+    else:
 
-    detected_boxes = utils.denorm_boxes(
-        mrcnn["detections"][0, :nb_detections, :4], activations[0].shape)
+        image = dataset.load_image(image_id)
 
-    # (nb_objs, nb_features,feature_sizexfeature_size)
-    # objects_features = np.zeros(
-    #     (nb_detections, len(activations), feature_size**2))
+        r = model.detect([image], verbose=0)[0]
 
-    objects_features = np.zeros(
-        (nb_detections, feature_size**2))
-
-    # for each (88, 140)
-    for j in range(len(detected_boxes)):
-
-        y1, x1, y2, x2 = detected_boxes[j]
-        x = (feature_size - (x2 - x1)) // 2
-        y = (feature_size - (y2 - y1)) // 2
-
-        object_feature = np.zeros((feature_size, feature_size))
-
-        for i in range(len(activations)):
-            # it s one of the activation maps of the image
-
-            # object_feature = np.zeros((feature_size, feature_size))
-
-            # Paste the foreground image onto the background image
-            # object_feature[y:y + (y2 - y1), x:x + (x2 - x1)
-            #                ] = activations[i][y1:y2, x1:x2]
-
-            object_feature[y:y + (y2 - y1), x:x + (x2 - x1)
-                           ] += activations[i][y1:y2, x1:x2]
-
-            # objects_features[j, i] = object_feature.ravel()
-        objects_features[j] = object_feature.ravel()
-
-    # HERE I RETURN THE BOXES FOR THE IMAGE
-    image, _, _, _, _ = utils.resize_image(
-        image,
-        min_dim=config.IMAGE_MIN_DIM,
-        min_scale=config.IMAGE_MIN_SCALE,
-        max_dim=config.IMAGE_MAX_DIM,
-        mode=config.IMAGE_RESIZE_MODE)
-
-    detected_boxes = utils.denorm_boxes(
-        mrcnn["detections"][0, :nb_detections, :4], (np.squeeze(image).shape[:2]))
-
-    return image, objects_features, detected_boxes
-
-
-def extract_image_boxes(image_id, model, config, dataset):
-
-    image = dataset.load_image(image_id)
-
-    mrcnn = model.run_graph([image], [
-        # backbone output
-        ("detections", model.keras_model.get_layer("mrcnn_detection").output),
-    ])
-
-    nb_detections = mrcnn['detections'][0, :, 4].astype(np.int32).sum()
-
-    # HERE I RETURN THE BOXES FOR THE IMAGE
-    image, _, _, _, _ = utils.resize_image(
-        image,
-        min_dim=config.IMAGE_MIN_DIM,
-        min_scale=config.IMAGE_MIN_SCALE,
-        max_dim=config.IMAGE_MAX_DIM,
-        mode=config.IMAGE_RESIZE_MODE)
-
-    detected_boxes = utils.denorm_boxes(
-        mrcnn["detections"][0, :nb_detections, :4], (np.squeeze(image).shape[:2]))
-
-    return image, detected_boxes
-
-
-def normalize(matrix):
-    # Normalize the matrix so that the minimum value is 0 and the maximum value is 1
-    matrix = (matrix - np.min(matrix)) / (np.max(matrix) - np.min(matrix))
-    return matrix
+        return image, r['rois'], r['masks'], r['scores']
 
 
 def remove_disappearing_objects(cost_matrix):
@@ -171,7 +75,7 @@ def remove_disappearing_objects(cost_matrix):
 
 class Tracker():
 
-    def __init__(self, DATASET_DIR2="", weights="", subdir="val", nb_images="all"):
+    def __init__(self, DATASET_DIR2="", weights="", subdir="val", path_ids="", nb_images="all"):
 
         self.gt_frames = None
 
@@ -197,29 +101,61 @@ class Tracker():
             self.detection_model, self.detection_weights)
 
         # this sets the self.frames
-        self.fill_sequence(self.dataset, nb_images)
+        self.fill_sequence(self.dataset, nb_images, path_ids)
 
         self.colors = random_colors(1000)
 
         self.max_id = 0
 
-    def fill_sequence(self, dataset, nb_images):
+    def fill_sequence(self, dataset, nb_images, path_ids):
 
         self.frames = np.empty((len(dataset.image_ids)), dtype=object) if(
             nb_images == "all") else np.empty((nb_images), dtype=object)
 
+        self.gt_frames = np.empty((len(self.frames)), dtype=object)
+
         images_ids = dataset.image_ids if(
             nb_images == "all")else dataset.image_ids[:nb_images]
+
+        if(path_ids != ""):
+            files_ids = sorted(os.listdir(path_ids))
 
         for i in range(len(images_ids)):
 
             identifier = dataset.image_info[images_ids[i]]["id"]
 
-            image, image_boxes = extract_image_boxes(
-                images_ids[i], self.detection_model, self.detection_config, dataset)
+            if path_ids != "":
 
-            self.frames[i] = Frame(
-                identifier, image, image_boxes=image_boxes, idx=i)
+                image, image_boxes, image_masks, image_scores, gt_boxes, gt_masks = extract_image_detections(
+                    images_ids[i], self.detection_model, self.detection_config, dataset)
+
+                image_masks = np.transpose(image_masks, (2, 0, 1))
+                gt_masks = np.transpose(gt_masks, (2, 0, 1))
+
+                self.frames[i] = Frame(
+                    identifier, image, image_boxes=image_boxes, image_masks=image_masks, image_scores=image_scores, idx=i)
+
+                self.gt_frames[i] = Frame(
+                    identifier, self.frames[i].image, image_boxes=gt_boxes, image_masks=gt_masks, idx=i)
+
+                # this part is to get the groundtruth ids
+                id_frame = skimage.io.imread(
+                    os.path.join(path_ids, files_ids[i]))
+
+                preds = None if i == 0 else objects_ids.copy()
+
+                objects_ids = np.unique(id_frame)[1:]
+
+                self.gt_frames[i].set_objects_ids(preds, objects_ids)
+
+            else:
+
+                image, image_boxes, image_masks, image_scores = extract_image_detections(
+                    images_ids[i], self.detection_model, self.detection_config, dataset, False)  # handle when there's no groundtruth
+                image_masks = np.transpose(image_masks, (2, 0, 1))
+
+                self.frames[i] = Frame(
+                    identifier, image, image_boxes=image_boxes, image_masks=image_masks, image_scores=image_scores, idx=i)
 
     def adjust_matchs(self, frame1, frame2, threshold=50):
 
@@ -304,6 +240,50 @@ class Tracker():
             frame1.get_all_boxes(), frame2.get_all_boxes())
 
         return remove_disappearing_objects(iou_cost_matrix)
+
+
+############################################################
+#  Evaluation
+############################################################
+
+    def compute_MOTA(self, iou_threshold=0.5, score_threshold=0.5):
+
+        # compute matchs per frames
+        for i in range(len(self.frames)):
+
+            # all ids are cells ofcs
+            pred_class_id = np.ones(len(self.frames[i].objects))
+            gt_class_id = np.ones(len(self.gt_frames[i].objects))
+
+            gt_box = self.gt_frames[i].get_all_boxes()
+
+            gt_mask = self.gt_frames[i].get_all_masks()
+
+            pred_box = self.frames[i].get_all_boxes()
+
+            pred_score = self.frames[i].get_all_scores()
+
+            pred_mask = self.frames[i].get_all_masks()
+
+            pred_mask = np.transpose(pred_mask, (1, 2, 0))
+
+            gt_mask = np.transpose(gt_mask, (1, 2, 0))
+
+            gt_match, pred_match, overlaps = utils.compute_matches(
+                gt_box, gt_class_id, gt_mask,
+                pred_box, pred_class_id, pred_score, pred_mask,
+                iou_threshold=iou_threshold, score_threshold=score_threshold)
+
+            for j in range(len(gt_match)):
+
+                if(gt_match[j] != -1 and pred_match[j] != -1):
+
+                    print(
+                        "(gt = {} , pred {}, iou {})".format(self.gt_frames[i].objects[int(gt_match[j])].id, self.frames[i].objects[int(pred_match[j])].id, overlaps[j]))
+
+############################################################
+#  Visualisation
+############################################################
 
     def show_tracking(self):
 
@@ -391,54 +371,6 @@ class Tracker():
 
         plt.close()
         return anim
-
-    def load_gt(self, path_ids="", path_boxes=""):
-
-        files_ids = sorted(os.listdir(path_ids))
-        files_boxes = sorted(os.listdir(path_boxes))
-
-        self.gt_frames = np.empty((len(self.frames)), dtype=object)
-
-        for i in range(len(files_boxes)):
-
-            id_frame = skimage.io.imread(
-                os.path.join(path_ids, files_ids[i]))
-
-            preds = None if i == 0 else objects_ids.copy()
-
-            objects_ids = np.array(
-                [obj.mean_intensity for obj in regionprops(id_frame, id_frame)], np.int32)
-
-            image = skimage.io.imread(
-                os.path.join(path_boxes, files_boxes[i]))
-
-            identifier = files_boxes[i]
-
-            image, window, scale, padding, crop = utils.resize_image(
-                gray2rgb(image),
-                min_dim=self.detection_config.IMAGE_MIN_DIM,
-                min_scale=self.detection_config.IMAGE_MIN_SCALE,
-                max_dim=self.detection_config.IMAGE_MAX_DIM,
-                mode=self.detection_config.IMAGE_RESIZE_MODE)
-
-            mask = utils.resize_mask(self.dataset.load_mask(
-                self.dataset.image_ids[i])[0], scale, padding, crop)
-
-            # image_boxes = np.array([obj.bbox for obj in regionprops(image)])
-
-            # image_boxes = rescale_bounding_boxes(
-            #     image_boxes, image.shape, self.frames[i].image.shape[:2])
-
-            image_boxes = utils.extract_bboxes(mask)
-
-            # image_boxes=rescale_bounding_boxes(
-            #     image_boxes, image.shape, self.frames[i].image.shape[:2])
-
-            self.gt_frames[i] = Frame(
-                identifier, self.frames[i].image, image_boxes=image_boxes, idx=i)
-
-            # i set the objects ids and predecessors relationship
-            self.gt_frames[i].set_objects_ids(preds, objects_ids)
 
     def video_tracking(self, interval=500, repeat_delay=10000):
 
